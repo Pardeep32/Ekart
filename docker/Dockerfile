@@ -1,11 +1,17 @@
-FROM openjdk:8u151-jdk-alpine3.7
+FROM maven:3.8.4-openjdk-17-slim AS builder
 
-EXPOSE 8070
+WORKDIR /app
 
-ENV APP_HOME /usr/src/app
+COPY . .
 
-COPY target/shopping-cart-0.0.1-SNAPSHOT.jar $APP_HOME/app.jar
+RUN mvn -B -DskipTests clean package
 
-WORKDIR $APP_HOME
+FROM openjdk:17-jdk-alpine3.14
 
-ENTRYPOINT exec java -jar app.jar
+WORKDIR /app
+
+COPY --from=builder /app/target/*.jar app.jar
+
+EXPOSE 8080
+
+CMD ["java", "-jar", "app.jar"]
