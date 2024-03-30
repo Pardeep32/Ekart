@@ -1,0 +1,100 @@
+pipeline {
+    agent any
+    tools {
+        // Define tools (JDK and Maven)
+        jdk 'jdk17'
+        maven 'maven3'
+    }
+    environment {
+        SCANNER_HOME = tool 'sonar-scanner'
+    }    
+    stages {
+        stage('git checkout') {
+            steps {
+                // Checkout code from the Git repository
+                git branch: 'main', credentialsId: 'github', url: 'https://github.com/Pardeep32/Ekart.git'
+            }
+        }
+        stage('Compile') {
+            steps {
+                // Compile the code using Maven
+                sh 'mvn clean compile -DskipTests=true'
+            }
+        }
+        stage('OWASP scan') {
+            steps {
+                // Print a debug message before starting the OWASP scan
+                echo 'Starting OWASP Dependency-Check scan'
+
+                // Perform OWASP Dependency-Check scan
+                dependencyCheck additionalArguments: '--scan ./ --format HTML', odcInstallation: 'DP-Check'
+
+                // Publish Dependency-Check report
+                dependencyCheckPublisher pattern: '**/dependency-check-report.html'
+
+                // Print a debug message after completing the OWASP scan
+                echo 'OWASP Dependency-Check scan completed'
+            }
+        }
+        stage('Sonar analysis') {
+            steps {
+                // Execute SonarQube analysis
+                withSonarQubeEnv('sonar-server') {
+                    sh '''$SCANNER_HOME/bin/sonar-scanner \
+                        -Dsonar.projectName=Shopping-cart \
+                        -Dsonar.java.binaries=. \
+                        -Dsonar.projectKey=Shopping-cart'''
+                }
+            }
+        }
+        stage('Build') {
+            steps {
+                // Compile the code using Maven
+                sh 'mvn clean package -DskipTests=true'
+            }
+        }
+        stage('docker build and push') {
+            steps {
+                // Build and push Docker image
+                script {
+                    // Call the withDockerRegistry step with a body
+                    withDockerRegistry(credentialsId: 'docker', toolName: 'docker') {
+                        // Inside the withDockerRegistry block, define Docker-related actions
+                        sh 'docker build -t shopping-cart -f docker/Dockerfile .'
+                        // Image name should be in the format: username/repository:tag
+                        sh 'docker tag shopping-cart pardeepkaur/shopping-cart:latest'
+                        sh 'docker push pardeepkaur/shopping-cart:latest'
+                    }
+                }
+            }
+        }
+
+        stage('docker run') {
+            steps {
+                script {
+                    // Run the Docker container
+                    withDockerRegistry(credentialsId: 'docker', toolName: 'docker') {
+                    sh 'docker run -d --name shop -p 8070:8070 pardeepkaur/shopping-cart:latest'
+                    }
+                }
+            }
+        }
+        stage('Deploy to Kubernetes') {
+    steps {
+        script {
+            withKubeConfig(
+                caCertificate: '',
+                clusterName: '',
+                contextName: '',
+                credentialsId: 'k8s', // This should refer to your Kubernetes credentials ID
+                namespace: '',
+                restrictKubeConfigAccess: false,
+                serverUrl: ''
+            ) {
+                sh 'kubectl apply -f deploymentservice.yml'
+            }
+        }
+    }
+}
+    }
+}
